@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>wx-md · 微信公众号 Markdown 渲染组件 · UI 原型</title>
+<style>
+  /* ============================================================
+     wx-md UI 原型样式
+     - 玻璃拟态 + 卡片式设计，参考 Notion / 掘金 / Vercel
+     - 主题通过 CSS 变量驱动，切换时预览区整体联动
+     ============================================================ */
+  :root {
+    --ease: cubic-bezier(0.4, 0, 0.2, 1);
+    /* 默认外壳配色（简约白） */
+    --chrome-bg: #eef2f7;
+    --blob1: rgba(99, 102, 241, 0.32);
+    --blob2: rgba(56, 189, 248, 0.28);
+    --card-bg: rgba(255, 255, 255, 0.72);
+    --card-border: rgba(255, 255, 255, 0.55);
+    --text: #1f2430;
+    --text-sub: #6b7280;
+  }
+  /* 各主题外壳配色（随主题切换而变化） */
+  body[data-theme="juejin-purple"] {
+    --chrome-bg: #f4f0ff; --blob1: rgba(139, 92, 246, 0.34); --blob2: rgba(217, 70, 239, 0.20); --text: #2a2340; --text-sub: #7a6f9e;
+  }
+  body[data-theme="wechat-dark"] {
+    --chrome-bg: #111417; --blob1: rgba(7, 193, 96, 0.22); --blob2: rgba(37, 211, 102, 0.12); --card-bg: rgba(30, 34, 40, 0.72); --card-border: rgba(255,255,255,0.08); --text: #e5e7eb; --text-sub: #9ca3af;
+  }
+  body[data-theme="tech-blue"] {
+    --chrome-bg: #eef4fb; --blob1: rgba(14, 165, 233, 0.28); --blob2: rgba(37, 99, 235, 0.24); --text: #17263b; --text-sub: #5b6b82;
+  }
+  body[data-theme="retro-orange"] {
+    --chrome-bg: #faf1e3; --blob1: rgba(234, 88, 12, 0.20); --blob2: rgba(251, 191, 36, 0.26); --text: #43302a; --text-sub: #8a6f5f;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+                 "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    background:
+      radial-gradient(1100px 560px at 8% -8%, var(--blob1), transparent 62%),
+      radial-gradient(900px 520px at 108% 108%, var(--blob2), transparent 60%),
+      var(--chrome-bg);
+    background-attachment: fixed;
+    color: var(--text);
+    min-height: 100vh;
+    transition: background 0.5s var(--ease), color 0.5s var(--ease);
+    padding: 24px 20px 48px;
+  }
+
+  .page { max-width: 1280px; margin: 0 auto; }
+
+  /* ---------- 顶部导航 ---------- */
+  .app-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 6px 22px;
+  }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .brand-logo {
+    width: 40px; height: 40px; border-radius: 12px;
+    display: grid; place-items: center; color: #fff;
+    background: linear-gradient(135deg, #07c160, #1e80ff);
+    box-shadow: 0 8px 20px rgba(30, 128, 255, 0.35);
+  }
+  .brand-name { font-size: 20px; font-weight: 700; letter-spacing: -0.3px; }
+  .brand-name em { font-style: normal; color: #07c160; }
+  .brand-sub { font-size: 12px; color: var(--text-sub); margin-top: 2px; }
+  .header-badge {
+    font-size: 12px; padding: 6px 12px; border-radius: 999px;
+    background: var(--card-bg); border: 1px solid var(--card-border);
+    backdrop-filter: blur(12px); color: var(--text-sub);
+    display: flex; align-items: center; gap: 6px;
+  }
+  .header-badge .dot { width: 8px; height: 8px; border-radius: 50%; background: #07c160; }
+
+  /* ---------- 工作区：编辑器 + 预览 ---------- */
+  .workspace {
+    display: grid;
+    grid-template-columns: minmax(300px, 380px) 1fr;
+    gap: 20px; align-items: start;
+  }
+
+  .card {
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 20px;
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    box-shadow: 0 20px 50px rgba(20, 25, 40, 0.10);
+    transition: background 0.5s var(--ease), border-color 0.5s var(--ease);
+  }
+
+  /* ---------- Markdown 输入面板 ---------- */
+  .editor-card { position: sticky; top: 20px; }
+  .editor-head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 14px 18px; border-bottom: 1px solid var(--card-border);
+    font-size: 13px; color: var(--text-sub); font-weight: 600;
+  }
+  .editor-head .pulse {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #07c160; box-shadow: 0 0 0 4px rgba(7, 193, 96, 0.18);
+  }
+  #md-input {
+    width: 100%; height: 560px; resize: vertical;
+    border: 0; outline: 0; background: transparent; color: var(--text);
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 13px; line-height: 1.7; padding: 16px 18px;
+    caret-color: #07c160;
+  }
+  #md-input::placeholder { color: var(--text-sub); opacity: 0.7; }
+
+  /* ---------- 预览面板 ---------- */
+  .preview-pane { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+
+  /* 顶部设置栏：悬浮固定、居中、玻璃拟态 */
+  .toolbar {
+    position: sticky; top: 16px; z-index: 20;
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    margin: 0 auto;
+    padding: 8px 10px;
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 16px;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    box-shadow: 0 10px 30px rgba(20, 25, 40, 0.12);
+    transition: background 0.5s var(--ease), border-color 0.5s var(--ease);
+  }
+  .tool-group {
+    display: flex; align-items: center; gap: 4px;
+    padding: 4px; border-radius: 12px;
+    background: rgba(127, 127, 127, 0.10);
+  }
+  .tbtn {
+    display: inline-flex; align-items: center; gap: 7px;
+    border: 0; cursor: pointer; border-radius: 10px;
+    padding: 8px 12px; font-size: 13px; font-weight: 600;
+    color: var(--text); background: transparent;
+    transition: background 0.2s var(--ease), transform 0.15s var(--ease), color 0.3s var(--ease);
+    font-family: inherit;
+  }
+  .tbtn:hover { background: rgba(127, 127, 127, 0.14); }
+  .tbtn:active { transform: scale(0.94); }
+  .tbtn svg { width: 17px; height: 17px; }
+  .tbtn .txt { color: var(--text-sub); }
+  .tbtn.active { background: #fff; color: #111; box-shadow: 0 4px 12px rgba(0,0,0,0.14); }
+  body[data-theme="wechat-dark"] .tbtn.active { background: #2b3139; color: #fff; }
+  .tbtn.active .txt { color: inherit; }
+  .tbtn-copy { background: linear-gradient(135deg, #07c160, #10b981); color: #fff; }
+  .tbtn-copy:hover { background: linear-gradient(135deg, #06ad55, #0ea371); }
+
+  /* 主题下拉菜单 */
+  .theme-menu {
+    position: absolute; top: calc(100% + 10px); left: 50%; transform: translateX(-50%);
+    min-width: 230px; padding: 8px;
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 16px;
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    box-shadow: 0 24px 60px rgba(15, 20, 35, 0.25);
+    opacity: 0; visibility: hidden;
+    transform: translateX(-50%) translateY(-6px);
+    transition: opacity 0.22s var(--ease), visibility 0.22s var(--ease), transform 0.22s var(--ease);
+    z-index: 30;
+  }
+  .theme-menu.open { opacity: 1; visibility: visible; transform: translateX(-50%) translateY(0); }
+  .theme-menu .ttl {
+    font-size: 11px; color: var(--text-sub); font-weight: 700;
+    letter-spacing: 1px; padding: 6px 10px; text-transform: uppercase;
+  }
+  .theme-opt {
+    display: flex; align-items: center; gap: 10px;
+    width: 100%; padding: 9px 10px; border: 0; border-radius: 10px;
+    background: transparent; color: var(--text); cursor: pointer;
+    font-size: 13.5px; font-weight: 600; font-family: inherit;
+    transition: background 0.15s var(--ease);
+  }
+  .theme-opt:hover { background: rgba(127, 127, 127, 0.14); }
+  .theme-opt .swatch {
+    width: 16px; height: 16px; border-radius: 6px; flex-shrink: 0;
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+  }
+  .theme-opt .check { margin-left: auto; opacity: 0; color: #07c160; }
+  .theme-opt.active .check { opacity: 1; }
+
+  /* ---------- 设备容器 ---------- */
+  .device-stage {
+    display: flex; justify-content: center; padding: 6px 0 10px;
+  }
+
+  /* 手机（iPhone 模拟） */
+  .device {
+    border-radius: 44px; overflow: hidden; flex-shrink: 0;
+    box-shadow: 0 30px 70px rgba(15, 20, 40, 0.28);
+    position: relative;
+    transition: width 0.45s var(--ease), border-radius 0.45s var(--ease);
+  }
+  .device-mobile { width: 388px; border: 10px solid #101215; }
+  .device-desktop { width: 800px; border: 1px solid var(--card-border); border-radius: 20px; box-shadow: 0 30px 70px rgba(15,20,40,0.18); }
+  .screen {
+    height: 640px; overflow-y: auto; overflow-x: hidden;
+    background: #fff; position: relative;
+    scrollbar-width: thin;
+  }
+  .device-mobile .screen { height: 720px; border-radius: 34px; }
+
+  /* 手机状态栏 + 灵动岛 + 底部横条（仅手机视图显示） */
+  .status-bar {
+    display: none; align-items: center; justify-content: space-between;
+    padding: 12px 26px 6px; font-size: 13px; font-weight: 600; color: #111;
+    position: sticky; top: 0; z-index: 5; background: #fff;
+  }
+  .status-bar .island {
+    position: absolute; left: 50%; top: 10px; transform: translateX(-50%);
+    width: 110px; height: 26px; border-radius: 14px; background: #111;
+  }
+  .status-bar .icons { display: flex; gap: 6px; align-items: center; }
+  .device-mobile .status-bar { display: flex; }
+  .home-bar {
+    display: none; position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%);
+    width: 120px; height: 5px; border-radius: 4px; background: rgba(0,0,0,0.85);
+    z-index: 6;
+  }
+  .device-mobile .home-bar { display: block; }
+
+  /* ---------- 文章内容（主题随 CSS 变量切换） ---------- */
+  .article {
+    padding: 34px 26px 56px;
+    font-size: var(--fs); line-height: var(--lh);
+    color: var(--text-c); background: var(--bg-c);
+    font-family: var(--font-body);
+    transition: background 0.4s var(--ease), color 0.4s var(--ease);
+  }
+  .article * { transition: color 0.35s var(--ease), background-color 0.35s var(--ease),
+               border-color 0.35s var(--ease), font-size 0.35s var(--ease); }
+
+  .article h1, .article h2, .article h3, .article h4, .article h5, .article h6 {
+    font-family: var(--font-heading);
+    color: var(--heading-c); font-weight: var(--heading-w);
+    line-height: 1.35; margin: 0.9em 0 0.45em; letter-spacing: var(--heading-ls, 0);
+  }
+  .article h1 { font-size: var(--h1); margin-top: 0; }
+  /* H2~H6 前置主题竖线：颜色与粗细随主题切换，突出整体风格变化 */
+  .article h2, .article h3, .article h4, .article h5, .article h6 {
+    border-left: var(--heading-bar-w) solid var(--heading-bar);
+    padding-left: 12px;
+  }
+  .article h2 { font-size: var(--h2); padding-bottom: 0.3em; border-bottom: 1px solid var(--hr-c); }
+  .article h3 { font-size: var(--h3); }
+  .article h4 { font-size: var(--h4); }
+  .article h5 { font-size: var(--h5); }
+  .article h6 { font-size: var(--h6); color: var(--text-sub); }
+
+  .article p { margin: 0.55em 0; }
+  .article strong { color: var(--strong-c); font-weight: 700; }
+  .article em { color: var(--em-c); }
+  .article del { color: var(--text-sub); }
+
+  .article a { color: var(--link-c); text-decoration: underline; text-underline-offset: 3px; }
+  .article a:hover { color: var(--link-hover); }
+
+  .article ul, .article ol { margin: 0.6em 0; padding-left: 1.6em; }
+  .article li { margin: 0.28em 0; }
+  .article ul li::marker { color: var(--marker-c); }
+  .article ol li::marker { color: var(--marker-c); font-weight: 700; }
+
+  .article blockquote {
+    margin: 1em 0; padding: 0.8em 1.1em;
+    background: var(--quote-bg); border-left: 4px solid var(--quote-border);
+    border-radius: 0 10px 10px 0; color: var(--quote-c);
+  }
+  .article blockquote p { margin: 0; }
+
+  .article hr {
+    border: 0; height: 1px; margin: 1.6em auto; width: 70%;
+    background: linear-gradient(90deg, transparent, var(--hr-c), transparent);
+  }
+
+  .article table {
+    width: 100%; border-collapse: collapse; margin: 1em 0;
+    font-size: 0.92em;
+  }
+  .article th, .article td { border: 1px solid var(--table-border); padding: 8px 12px; text-align: left; }
+  .article th { background: var(--table-head); color: var(--heading-c); font-weight: 700; }
+  .article tr:nth-child(even) td { background: var(--table-zebra); }
+
+  .inline-code {
+    font-family: "SFMono-Regular", Consolas, Menlo, monospace;
+    font-size: 0.88em; padding: 2px 6px; border-radius: 6px;
+    background: var(--code-bg); color: var(--code-text);
+  }
+
+  /* ---------- 代码块：macOS 风格容器 ---------- */
+  .code-block {
+    margin: 1em 0; border-radius: 12px; overflow: hidden;
+    background: #0d1117; /* github-dark 背景，所有主题统一保持深色 */
+    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.35);
+  }
+  .code-head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 14px; background: #161b22;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  }
+  .code-head .dot { width: 12px; height: 12px; border-radius: 50%; }
+  .dot.r { background: #ff5f57; } .dot.y { background: #febc2e; } .dot.g { background: #28c840; }
+  .code-lang {
+    margin-left: auto; font-size: 11px; color: #8b949e;
+    font-family: "SFMono-Regular", Consolas, Menlo, monospace;
+    letter-spacing: 0.5px;
+  }
+  .code-body {
+    padding: 14px 16px; overflow-x: auto; color: #e6edf3;
+    font-family: "SFMono-Regular", Consolas, Menlo, monospace;
+    font-size: 13px; line-height: 1.7;
+  }
+  /* github-dark token 配色兜底（高亮函数输出行内样式，这里作为备用） */
+  .tok-kw { color: #ff7b72; } .tok-str { color: #a5d6ff; }
+  .tok-com { color: #8b949e; font-style: italic; } .tok-num { color: #79c0ff; }
+
+  /* ---------- 主题变量定义（简约白 = 默认） ---------- */
+  .theme-minimal-white {
+    --bg-c: #ffffff; --text-c: #333333; --heading-c: #1a1a1a; --text-sub: #6b7280;
+    --strong-c: #1a1a1a; --em-c: #444444;
+    --link-c: #1e80ff; --link-hover: #0b5cd6;
+    --quote-bg: #f6f8fa; --quote-border: #d0d7de; --quote-c: #57606a;
+    --marker-c: #1e80ff; --hr-c: #e5e7eb;
+    --heading-bar: #1e80ff; --heading-bar-w: 3px;
+    --code-bg: #f0f2f5; --code-text: #24292e;
+    --table-head: #f6f8fa; --table-border: #d8dee4; --table-zebra: #fafbfc;
+    --font-body: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    --font-heading: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    --heading-w: 700;
+    --h1: 30px; --h2: 24px; --h3: 20px; --h4: 17px; --h5: 15px; --h6: 14px;
+    --fs: 16px; --lh: 1.75;
+  }
+  .theme-juejin-purple {
+    --bg-c: #ffffff; --text-c: #3a3550; --heading-c: #5b21b6; --text-sub: #8b7fae;
+    --strong-c: #5b21b6; --em-c: #6d5aa8;
+    --link-c: #8b5cf6; --link-hover: #6d28d9;
+    --quote-bg: #f5f3ff; --quote-border: #c4b5fd; --quote-c: #6d5aa8;
+    --marker-c: #8b5cf6; --hr-c: #ede9fe;
+    --heading-bar: #8b5cf6; --heading-bar-w: 4px;
+    --code-bg: #f7f4ff; --code-text: #4c1d95;
+    --table-head: #f5f3ff; --table-border: #ddd6fe; --table-zebra: #faf9ff;
+    --font-body: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    --font-heading: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    --heading-w: 700;
+    --h1: 28px; --h2: 22px; --h3: 19px; --h4: 16px; --h5: 14px; --h6: 13px;
+    --fs: 16px; --lh: 1.78;
+  }
+  .theme-wechat-dark {
+    --bg-c: #1a1d21; --text-c: #c8d0d8; --heading-c: #f2f5f7; --text-sub: #8b949e;
+    --strong-c: #07c160; --em-c: #a7b3bf;
+    --link-c: #4ade80; --link-hover: #07c160;
+    --quote-bg: #23272b; --quote-border: #07c160; --quote-c: #9fb3a8;
+    --marker-c: #07c160; --hr-c: rgba(255, 255, 255, 0.10);
+    --heading-bar: #07c160; --heading-bar-w: 4px;
+    --code-bg: #0d1117; --code-text: #e6edf3;
+    --table-head: #23272b; --table-border: #33383f; --table-zebra: #1f2328;
+    --font-body: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    --font-heading: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    --heading-w: 600;
+    --h1: 32px; --h2: 25px; --h3: 21px; --h4: 18px; --h5: 15px; --h6: 14px;
+    --fs: 16px; --lh: 1.82;
+  }
+  .theme-tech-blue {
+    --bg-c: #f8fafc; --text-c: #26354a; --heading-c: #0f2a52; --text-sub: #5b6b82;
+    --strong-c: #0f2a52; --em-c: #3b5373;
+    --link-c: #2563eb; --link-hover: #1d4ed8;
+    --quote-bg: #eff6ff; --quote-border: #93c5fd; --quote-c: #3b6cb0;
+    --marker-c: #2563eb; --hr-c: #dbe7f5;
+    --heading-bar: #2563eb; --heading-bar-w: 3px;
+    --code-bg: #eef4fb; --code-text: #1e3a8a;
+    --table-head: #eff6ff; --table-border: #c7dcf5; --table-zebra: #f4f9fe;
+    --font-body: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    --font-heading: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    --heading-w: 700;
+    --h1: 29px; --h2: 23px; --h3: 19px; --h4: 16px; --h5: 14px; --h6: 13px;
+    --fs: 16px; --lh: 1.76;
+  }
+  .theme-retro-orange {
+    --bg-c: #fdf6ec; --text-c: #4a3728; --heading-c: #c2410c; --text-sub: #8a6f5f;
+    --strong-c: #b45309; --em-c: #7c5a3a;
+    --link-c: #d97706; --link-hover: #b45309;
+    --quote-bg: #fff7ed; --quote-border: #fdba74; --quote-c: #9a6b3f;
+    --marker-c: #ea580c; --hr-c: #ecd9c3;
+    --heading-bar: #ea580c; --heading-bar-w: 5px;
+    --code-bg: #f4e8d8; --code-text: #7c4a1e;
+    --table-head: #fff7ed; --table-border: #e8d3b8; --table-zebra: #fbf1e2;
+    --font-body: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    --font-heading: Georgia, "Songti SC", "SimSun", serif;
+    --heading-w: 600; --heading-ls: 1px;
+    --h1: 34px; --h2: 27px; --h3: 22px; --h4: 18px; --h5: 16px; --h6: 14px;
+    --fs: 16.5px; --lh: 1.9;
+  }
+
+  /* ---------- Toast ---------- */
+  .toast {
+    position: fixed; left: 50%; bottom: 34px; transform: translate(-50%, 16px);
+    padding: 12px 20px; border-radius: 12px; z-index: 100;
+    background: rgba(17, 24, 39, 0.92); color: #fff; font-size: 13.5px; font-weight: 600;
+    display: flex; align-items: center; gap: 8px;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.30);
+    opacity: 0; visibility: hidden;
+    transition: opacity 0.25s var(--ease), visibility 0.25s var(--ease), transform 0.25s var(--ease);
+  }
+  .toast.show { opacity: 1; visibility: visible; transform: translate(-50%, 0); }
+
+  /* ---------- 响应式 ---------- */
+  @media (max-width: 1020px) {
+    .workspace { grid-template-columns: 1fr; }
+    .editor-card { position: static; }
+    #md-input { height: 220px; }
+    .device-mobile { width: 340px; }
+    .device-desktop { width: 680px; }
+  }
+  @media (max-width: 520px) {
+    body { padding: 16px 10px 40px; }
+    .header-badge { display: none; }
+    .device-mobile { width: 300px; }
+    .device-desktop { width: calc(100vw - 20px); }
+    .screen, .device-mobile .screen { height: 520px; }
+    .tbtn { padding: 8px 9px; }
+    .article { padding: 22px 18px 44px; }
+  }
+</style>
+</head>
+<body data-theme="minimal-white">
+
+<div class="page">
+
+  <!-- 顶部导航 -->
+  <header class="app-header">
+    <div class="brand">
+      <div class="brand-logo">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+      </div>
+      <div>
+        <div class="brand-name">wx<em>-md</em></div>
+        <div class="brand-sub">微信公众号 Markdown 渲染组件 · 高保真 UI 原型</div>
+      </div>
+    </div>
+    <div class="header-badge"><span class="dot"></span> 交互原型 · 主题 / 视图 / 复制</div>
+  </header>
+
+  <div class="workspace">
+
+    <!-- 编辑器：模拟外部 Markdown 输入，实时渲染 -->
+    <section class="card editor-card">
+      <div class="editor-head"><span class="pulse"></span> Markdown 输入 · 实时渲染</div>
+      <textarea id="md-input" spellcheck="false" placeholder="在此输入 Markdown，右侧预览实时更新…"></textarea>
+    </section>
+
+    <!-- 预览面板 -->
+    <section class="preview-pane">
+
+      <!-- 顶部设置区域：悬浮固定、居中、图标化 -->
+      <div class="toolbar" id="toolbar">
+        <!-- 主题切换：图标 + “选择主题” 文字 + 下拉 -->
+        <div style="position: relative">
+          <button class="tbtn" id="themeBtn" aria-label="选择主题">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r="0.5"/><circle cx="17.5" cy="10.5" r="0.5"/><circle cx="8.5" cy="7.5" r="0.5"/><circle cx="6.5" cy="12.5" r="0.5"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></svg>
+            <span class="txt">选择主题</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+          <!-- 主题下拉列表 -->
+          <div class="theme-menu" id="themeMenu">
+            <div class="ttl">视觉主题</div>
+            <button class="theme-opt active" data-theme="minimal-white"><span class="swatch" style="background:#ffffff;border:1px solid #d0d7de"></span>简约白<svg class="check" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></button>
+            <button class="theme-opt" data-theme="juejin-purple"><span class="swatch" style="background:#8b5cf6"></span>掘金酱紫<svg class="check" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></button>
+            <button class="theme-opt" data-theme="wechat-dark"><span class="swatch" style="background:#1a1d21;border:1px solid #33383f"></span>微信暗黑<svg class="check" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></button>
+            <button class="theme-opt" data-theme="tech-blue"><span class="swatch" style="background:#2563eb"></span>科技蓝<svg class="check" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></button>
+            <button class="theme-opt" data-theme="retro-orange"><span class="swatch" style="background:#ea580c"></span>复古橙<svg class="check" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></button>
+          </div>
+        </div>
+
+        <!-- 视图模式切换：手机 / 桌面 -->
+        <div class="tool-group" role="group" aria-label="视图模式">
+          <button class="tbtn active" id="viewMobile" aria-label="手机视图">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2" width="10" height="20" rx="2"/><line x1="11" y1="18" x2="13" y2="18"/></svg>
+          </button>
+          <button class="tbtn" id="viewDesktop" aria-label="桌面视图">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+          </button>
+        </div>
+
+        <!-- 一键复制 -->
+        <button class="tbtn tbtn-copy" id="copyBtn" aria-label="一键复制">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        </button>
+      </div>
+
+      <!-- 设备容器（手机 / 桌面） -->
+      <div class="device-stage">
+        <div class="device device-mobile" id="device">
+          <div class="status-bar">
+            <span>9:41</span>
+            <span class="island"></span>
+            <span class="icons">
+              <svg width="15" height="11" viewBox="0 0 18 12" fill="currentColor"><rect x="0" y="7" width="3" height="5" rx="1"/><rect x="5" y="5" width="3" height="7" rx="1"/><rect x="10" y="2" width="3" height="10" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1" opacity="0.35"/></svg>
+              <svg width="15" height="11" viewBox="0 0 16 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M1 4.5a10 10 0 0 1 14 0"/><path d="M3.5 7a6.5 6.5 0 0 1 9 0"/><path d="M6 9.5a3 3 0 0 1 4 0"/><circle cx="8" cy="11" r="0.8" fill="currentColor"/></svg>
+            </span>
+          </div>
+          <div class="screen" id="screen">
+            <article class="article theme-minimal-white" id="article"></article>
+          </div>
+          <div class="home-bar"></div>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<!-- 复制成功提示 -->
+<div class="toast" id="toast">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+  <span id="toastText">已复制到剪贴板</span>
+</div>
+
+<!-- 示例 Markdown（作为 textarea 初始内容） -->
+<script type="text/plain" id="md-sample">
+# wx-md 组件渲染效果
+
+一款专为 **微信公众号** 排版优化的 Markdown 渲染组件，支持 *实时预览*、~~删除线~~、`行内代码` 与[超链接](https://mp.weixin.qq.com)。切换主题即可看到标题、引用、链接与强调文字的联动变化。
+
+## 功能特性
+
+- 主题切换：5 套预设视觉主题
+- 视图模式：手机 / 桌面双端预览
+- 一键复制：内联样式，适配公众号粘贴
+
+1. 编写 Markdown
+2. 左侧实时预览
+3. 一键复制粘贴到公众号
+
+### 代码示例（macOS 风格 + GitHub Dark）
+
+```js
+// 渲染一个公众号兼容的代码块
+function hello(name) {
+  const msg = `Hello, ${name}!`;
+  console.log(msg); // 输出问候语
+  return msg;
+}
+```
+
+> 引用块：公众号编辑器只保留内联样式，组件输出即为微信白名单格式。
+
+## 表格对比
+
+| 主题 | 风格 | 主色 |
+| --- | --- | --- |
+| 简约白 | 简洁通用 | #1e80ff |
+| 掘金酱紫 | 社区风格 | #8b5cf6 |
+| 微信暗黑 | 夜间友好 | #07c160 |
+
+#### 四级标题
+
+##### 五级标题
+
+###### 六级标题
+
+---
+
+文章末尾的分割线。
+</script>
+
+<script>
+  /* ============================================================
+     wx-md 原型交互逻辑（仅用于演示，非最终实现）
+     - 轻量 Markdown 渲染器：模拟“外部内容 → 实时渲染”
+     - 主题切换、视图切换、一键复制
+     ============================================================ */
+
+  var body = document.body;
+  var article = document.getElementById('article');
+  var mdInput = document.getElementById('md-input');
+  var device = document.getElementById('device');
+  var toast = document.getElementById('toast');
+  var toastText = document.getElementById('toastText');
+  var themeMenu = document.getElementById('themeMenu');
+  var themeBtn = document.getElementById('themeBtn');
+  var currentTheme = 'minimal-white';
+  var currentView = 'mobile';
+
+  /* ---------- 轻量 Markdown → HTML ---------- */
+  function esc(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  function renderInline(t) {
+    var s = esc(t);
+    s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
+    s = s.replace(/~~([^~]+)~~/g, '<del>$1</del>');
+    s = s.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
+    s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2">$1</a>');
+    return s;
+  }
+  /* GitHub Dark 配色，token 以行内样式输出（贴近“内联样式”产品形态） */
+  function highlight(code) {
+    var s = esc(code);
+    s = s.replace(/(\/\/[^\n]*|\/\*[\s\S]*?\*\/)/g, '<span style="color:#8b949e;font-style:italic">$1</span>');
+    s = s.replace(/("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)/g, '<span style="color:#a5d6ff">$1</span>');
+    s = s.replace(/\b(const|let|var|function|return|if|else|for|while|import|from|export|class|new|async|await|try|catch|throw|typeof|of|in)\b/g, '<span style="color:#ff7b72">$1</span>');
+    s = s.replace(/\b(\d+(?:\.\d+)?)\b/g, '<span style="color:#79c0ff">$1</span>');
+    return s;
+  }
+  function renderMarkdown(md) {
+    var lines = md.split('\n');
+    var out = [], i = 0;
+    while (i < lines.length) {
+      var line = lines[i];
+      var fence = line.match(/^```(\w*)/);
+      if (fence) {
+        var lang = fence[1] || 'code';
+        var buf = [];
+        i++;
+        while (i < lines.length && !lines[i].trim().startsWith('```')) { buf.push(lines[i]); i++; }
+        i++;
+        out.push('<div class="code-block"><div class="code-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="code-lang">' + lang + '</span></div><pre class="code-body">' + highlight(buf.join('\n')) + '</pre></div>');
+        continue;
+      }
+      var h = line.match(/^(#{1,6})\s+(.*)/);
+      if (h) { var n = h[1].length; out.push('<h' + n + '>' + renderInline(h[2]) + '</h' + n + '>'); i++; continue; }
+      if (/^\s*(---|\*\*\*|___)\s*$/.test(line)) { out.push('<hr/>'); i++; continue; }
+      if (/^\s*>\s?/.test(line)) {
+        var q = [];
+        while (i < lines.length && /^\s*>/.test(lines[i])) { q.push(lines[i].replace(/^\s*>\s?/, '')); i++; }
+        out.push('<blockquote>' + renderInline(q.join('<br/>')) + '</blockquote>');
+        continue;
+      }
+      if (/^\s*[-*+]\s+/.test(line)) {
+        var ul = [];
+        while (i < lines.length && /^\s*[-*+]\s+/.test(lines[i])) { ul.push('<li>' + renderInline(lines[i].replace(/^\s*[-*+]\s+/, '')) + '</li>'); i++; }
+        out.push('<ul>' + ul.join('') + '</ul>');
+        continue;
+      }
+      if (/^\s*\d+\.\s+/.test(line)) {
+        var ol = [];
+        while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) { ol.push('<li>' + renderInline(lines[i].replace(/^\s*\d+\.\s+/, '')) + '</li>'); i++; }
+        out.push('<ol>' + ol.join('') + '</ol>');
+        continue;
+      }
+      if (/^\s*\|/.test(line) && i + 1 < lines.length && /^\s*\|[\s:|-]+\|/.test(lines[i + 1])) {
+        var head = line.split('|').map(function (s) { return s.trim(); }).filter(Boolean);
+        var rows = [];
+        i += 2;
+        while (i < lines.length && /^\s*\|/.test(lines[i])) {
+          var cells = lines[i].split('|').map(function (s) { return s.trim(); }).filter(Boolean);
+          rows.push('<tr>' + cells.map(function (c) { return '<td>' + renderInline(c) + '</td>'; }).join('') + '</tr>');
+          i++;
+        }
+        out.push('<table><thead><tr>' + head.map(function (c) { return '<th>' + renderInline(c) + '</th>'; }).join('') + '</tr></thead><tbody>' + rows.join('') + '</tbody></table>');
+        continue;
+      }
+      if (line.trim() === '') { i++; continue; }
+      var p = [];
+      while (i < lines.length && lines[i].trim() !== '' && !/^(#{1,6}\s|```|>|\s*[-*+]\s|\s*\d+\.\s)/.test(lines[i])) { p.push(lines[i]); i++; }
+      out.push('<p>' + renderInline(p.join(' ')) + '</p>');
+    }
+    return out.join('\n');
+  }
+
+  /* ---------- 实时渲染 ---------- */
+  function updatePreview() {
+    article.innerHTML = renderMarkdown(mdInput.value);
+  }
+  mdInput.addEventListener('input', updatePreview);
+
+  /* ---------- 主题切换 ---------- */
+  function setTheme(id) {
+    currentTheme = id;
+    body.setAttribute('data-theme', id);
+    article.className = 'article theme-' + id; // 整体样式随主题变化
+    var opts = themeMenu.querySelectorAll('.theme-opt');
+    for (var k = 0; k < opts.length; k++) {
+      opts[k].classList.toggle('active', opts[k].getAttribute('data-theme') === id);
+    }
+  }
+  themeBtn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    themeMenu.classList.toggle('open');
+  });
+  themeMenu.addEventListener('click', function (e) {
+    var opt = e.target.closest('.theme-opt');
+    if (opt) { setTheme(opt.getAttribute('data-theme')); themeMenu.classList.remove('open'); }
+  });
+  document.addEventListener('click', function () { themeMenu.classList.remove('open'); });
+
+  /* ---------- 视图切换 ---------- */
+  function setView(v) {
+    currentView = v;
+    device.className = 'device device-' + (v === 'mobile' ? 'mobile' : 'desktop');
+    document.getElementById('viewMobile').classList.toggle('active', v === 'mobile');
+    document.getElementById('viewDesktop').classList.toggle('active', v === 'desktop');
+  }
+  document.getElementById('viewMobile').addEventListener('click', function () { setView('mobile'); });
+  document.getElementById('viewDesktop').addEventListener('click', function () { setView('desktop'); });
+
+  /* ---------- 一键复制（富文本 HTML，适配公众号） ---------- */
+  function showToast(msg) {
+    toastText.textContent = msg;
+    toast.classList.add('show');
+    clearTimeout(toast._t);
+    toast._t = setTimeout(function () { toast.classList.remove('show'); }, 2200);
+  }
+  document.getElementById('copyBtn').addEventListener('click', function () {
+    var html = article.outerHTML; // 携带主题内联样式的内容区 HTML
+    try {
+      navigator.clipboard.write([
+        new ClipboardItem({
+          'text/html': new Blob([html], { type: 'text/html' }),
+          'text/plain': new Blob([article.textContent], { type: 'text/plain' })
+        })
+      ]).then(function () { showToast('已复制（内联样式 · 适配公众号）'); },
+             function () { showToast('复制失败，请重试'); });
+    } catch (err) {
+      // 降级：选中内容复制
+      var range = document.createRange();
+      range.selectNodeContents(article);
+      var sel = window.getSelection();
+      sel.removeAllRanges(); sel.addRange(range);
+      try { document.execCommand('copy'); showToast('已复制（降级方式）'); }
+      catch (e) { showToast('复制失败，请重试'); }
+      sel.removeAllRanges();
+    }
+  });
+
+  /* ---------- 初始化 ---------- */
+  mdInput.value = document.getElementById('md-sample').textContent.trim();
+  updatePreview();
+  setTheme('minimal-white'); // 默认展示第一个主题
+  setView('mobile');         // 默认手机视图
+</script>
+</body>
+</html>
